@@ -63,7 +63,7 @@ app.post('/api/auth/register', async (req, res) => {
             });
         }
 
-        // Create new user
+        // Create new use
         const user = new User({
             name,
             email,
