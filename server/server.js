@@ -1,0 +1,766 @@
+// Import required modules
+const express = require('express');
+const cors = require('cors');
+const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
+const User = require('./models/User');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// CORS configuration
+app.use(cors({
+    origin: ['http://localhost:5173', 'http://localhost:5174'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
+}));
+
+app.use(express.json());
+
+// Authentication middleware
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+        return res.status(401).json({ 
+            status: "error", 
+            message: "Access token required" 
+        });
+    }
+
+    jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', (err, user) => {
+        if (err) {
+            return res.status(403).json({ 
+                status: "error", 
+                message: "Invalid or expired token" 
+            });
+        }
+        req.user = user;
+        next();
+    });
+};
+
+// Connect to MongoDB
+mongoose.connect(process.env.MONGODB_URI)
+.then(() => console.log('MongoDB connected'))
+.catch(err => console.error('MongoDB connection error:', err));
+
+// Authentication Routes
+
+// 1. Register new user
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const { name, email, password, phone, address } = req.body;
+
+        // Check if user already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({
+                status: "error",
+                message: "User with this email already exists"
+            });
+        }
+
+        // Create new user
+        const user = new User({
+            name,
+            email,
+            password,
+            phone,
+            address
+        });
+
+        await user.save();
+
+        // Generate JWT token
+        const token = jwt.sign(
+            { userId: user._id, email: user.email, role: user.role },
+            process.env.JWT_SECRET || 'your-secret-key',
+            { expiresIn: '24h' }
+        );
+
+        res.status(201).json({
+            status: "success",
+            message: "User registered successfully",
+            data: {
+                user: {
+                    id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    role: user.role
+                },
+                token
+            }
+        });
+    } catch (error) {
+        console.error('Registration error:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error registering user"
+        });
+    }
+});
+
+// 2. Login user
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        // Find user by email
+        const user = await User.findOne({ email }).select('+password');
+        if (!user) {
+            return res.status(401).json({
+                status: "error",
+                message: "Invalid email or password"
+            });
+        }
+
+        // Check password
+        const isPasswordValid = await user.comparePassword(password);
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                status: "error",
+                message: "Invalid email or password"
+            });
+        }
+
+        // Generate JWT token
+        const token = jwt.sign(
+            { userId: user._id, email: user.email, role: user.role },
+            process.env.JWT_SECRET || 'your-secret-key',
+            { expiresIn: '24h' }
+        );
+
+        res.json({
+            status: "success",
+            message: "Login successful",
+            data: {
+                user: {
+                    id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    role: user.role
+                },
+                token
+            }
+        });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error during login"
+        });
+    }
+});
+
+// 3. Get current user profile
+app.get('/api/auth/profile', authenticateToken, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.userId).select('-password');
+        if (!user) {
+            return res.status(404).json({
+                status: "error",
+                message: "User not found"
+            });
+        }
+
+        res.json({
+            status: "success",
+            data: user
+        });
+    } catch (error) {
+        console.error('Profile fetch error:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error fetching profile"
+        });
+    }
+});
+
+// 4. Update user profile
+app.put('/api/auth/profile', authenticateToken, async (req, res) => {
+    try {
+        const { name, phone, address } = req.body;
+        
+        const user = await User.findById(req.user.userId);
+        if (!user) {
+            return res.status(404).json({
+                status: "error",
+                message: "User not found"
+            });
+        }
+
+        // Update fields
+        if (name) user.name = name;
+        if (phone) user.phone = phone;
+        if (address) user.address = address;
+
+        await user.save();
+
+        res.json({
+            status: "success",
+            message: "Profile updated successfully",
+            data: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                phone: user.phone,
+                address: user.address
+            }
+        });
+    } catch (error) {
+        console.error('Profile update error:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error updating profile"
+        });
+    }
+});
+
+// 5. Change password
+app.put('/api/auth/change-password', authenticateToken, async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        const user = await User.findById(req.user.userId).select('+password');
+        if (!user) {
+            return res.status(404).json({
+                status: "error",
+                message: "User not found"
+            });
+        }
+
+        // Verify current password
+        const isCurrentPasswordValid = await user.comparePassword(currentPassword);
+        if (!isCurrentPasswordValid) {
+            return res.status(400).json({
+                status: "error",
+                message: "Current password is incorrect"
+            });
+        }
+
+        // Update password
+        user.password = newPassword;
+        await user.save();
+
+        res.json({
+            status: "success",
+            message: "Password changed successfully"
+        });
+    } catch (error) {
+        console.error('Password change error:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error changing password"
+        });
+    }
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({
+        status: "error",
+        message: "Something went wrong!"
+    });
+});
+
+// Sample data for events (temporary until MongoDB is fully set up)
+const events = [
+    {
+        id: 1,
+        title: "Royal Wedding Ceremony",
+        date: "2024-06-15",
+        location: "Bengaluru Palace",
+        type: "Wedding",
+        status: "Upcoming",
+        description: "Luxury wedding event with traditional ceremonies",
+        price: "₹5,00,000",
+        image: "https://images.unsplash.com/photo-1519741497674-611481863552"
+    },
+    {
+        id: 2,
+        title: "Tech Conference 2024",
+        date: "2024-07-20",
+        location: "Pune Convention Center",
+        type: "Corporate",
+        status: "Upcoming",
+        description: "Annual technology conference with industry leaders",
+        price: "₹2,50,000",
+        image: "https://images.unsplash.com/photo-1540575467063-178a50c2df87"
+    },
+    {
+        id: 3,
+        title: "Birthday Bash",
+        date: "2024-05-10",
+        location: "Fun World",
+        type: "Birthday",
+        status: "Upcoming",
+        description: "Themed birthday party for kids",
+        price: "₹50,000",
+        image: "https://images.unsplash.com/photo-1464349153735-7db50ed83c84"
+    }
+];
+
+// Sample data for services
+const services = {
+    wedding: [
+        {
+            id: 1,
+            title: "Complete Wedding Planning",
+            description: "End-to-end wedding planning services",
+            price: "Starting from ₹3,00,000",
+            includes: ["Venue Selection", "Decor", "Catering", "Photography"]
+        },
+        {
+            id: 2,
+            title: "Wedding Decoration",
+            description: "Luxury wedding decoration services",
+            price: "Starting from ₹1,00,000",
+            includes: ["Floral Decor", "Lighting", "Stage Setup", "Seating Arrangement"]
+        }
+    ],
+    birthday: [
+        {
+            id: 1,
+            title: "Kids Birthday Package",
+            description: "Complete birthday party planning for kids",
+            price: "Starting from ₹25,000",
+            includes: ["Theme Decoration", "Games", "Magic Show", "Cake"]
+        },
+        {
+            id: 2,
+            title: "Adult Birthday Package",
+            description: "Elegant birthday celebrations for adults",
+            price: "Starting from ₹50,000",
+            includes: ["Venue Booking", "Catering", "Music", "Decor"]
+        }
+    ],
+    corporate: [
+        {
+            id: 1,
+            title: "Conference Package",
+            description: "Professional conference planning services",
+            price: "Starting from ₹2,00,000",
+            includes: ["Venue", "AV Equipment", "Catering", "Registration"]
+        },
+        {
+            id: 2,
+            title: "Team Building Events",
+            description: "Engaging team building activities",
+            price: "Starting from ₹75,000",
+            includes: ["Activities", "Venue", "Refreshments", "Coordination"]
+        }
+    ]
+};
+
+// GET Endpoints
+
+//A  API works like asking for information—sending a request to a server,
+//  and the server gives back the data you need. 
+// It doesn't change anything on the server, just retrieves the requested details.
+
+// 1. Get all events
+app.get('/api/events', (req, res) => {
+    try {
+        console.log('Fetching events...');
+        res.json({
+            status: "success",
+            data: events
+        });
+    } catch (error) {
+        console.error('Error in /api/events:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error fetching events"
+        });
+    }
+});
+
+// 2. Get event by ID
+app.get('/api/events/:id', (req, res) => {
+    const eventId = parseInt(req.params.id);
+    const event = events.find(e => e.id === eventId);
+    
+    if (!event) {
+        return res.status(404).json({ status: "error", message: "Event not found" });
+    }
+    res.json({ status: "success", data: event });
+});
+
+// 3. Get events by type
+app.get('/api/events/type/:type', (req, res) => {
+    const eventType = req.params.type;
+    const filteredEvents = events.filter(
+        event => event.type.toLowerCase() === eventType.toLowerCase()
+    );
+    res.json({ status: "success", data: filteredEvents });
+});
+
+// 4. Get all services
+app.get('/api/services', (req, res) => {
+    res.json({ status: "success", data: services });
+});
+
+// 5. Get services by category
+app.get('/api/services/:category', (req, res) => {
+    const category = req.params.category.toLowerCase();
+    const categoryServices = services[category];
+
+    if (!categoryServices) {
+        return res.status(404).json({ 
+            status: "error", 
+            message: "Category not found" 
+        });
+    }
+    res.json({ status: "success", data: categoryServices });
+});
+
+// 6. Search events
+app.get('/api/search', (req, res) => {
+    const { query } = req.query;
+
+    if (!query) {
+        return res.json({ status: "success", data: events });
+    }
+
+    const searchResults = events.filter(event => 
+        event.title.toLowerCase().includes(query.toLowerCase()) ||
+        event.description.toLowerCase().includes(query.toLowerCase()) ||
+        event.location.toLowerCase().includes(query.toLowerCase())
+    );
+
+    res.json({ status: "success", data: searchResults });
+});
+
+// 7. Get upcoming events
+app.get('/api/events/upcoming', (req, res) => {
+    const today = new Date();
+    const upcomingEvents = events.filter(event => {
+        const eventDate = new Date(event.date);
+        return eventDate >= today;
+    });
+    res.json({ status: "success", data: upcomingEvents });
+});
+
+// 8. Get events by date range
+app.get('/api/events/range', (req, res) => {
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+        return res.status(400).json({
+            status: "error",
+            message: "Start date and end date are required"
+        });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    const eventsInRange = events.filter(event => {
+        const eventDate = new Date(event.date);
+        return eventDate >= start && eventDate <= end;
+    });
+
+    res.json({ status: "success", data: eventsInRange });
+});
+
+// 9. Get event statistics
+app.get('/api/events/stats', (req, res) => {
+    const stats = {
+        totalEvents: events.length,
+        eventsByType: {},
+        eventsByStatus: {},
+        priceRange: {
+            min: Infinity,
+            max: 0,
+            average: 0
+        }
+    };
+
+    // Calculate statistics
+    events.forEach(event => {
+        // Count by type
+        stats.eventsByType[event.type] = (stats.eventsByType[event.type] || 0) + 1;
+        
+        // Count by status
+        stats.eventsByStatus[event.status] = (stats.eventsByStatus[event.status] || 0) + 1;
+        
+        // Price calculations
+        const price = parseInt(event.price.replace(/[^0-9]/g, ''));
+        stats.priceRange.min = Math.min(stats.priceRange.min, price);
+        stats.priceRange.max = Math.max(stats.priceRange.max, price);
+    });
+
+    // Calculate average price
+    const totalPrice = events.reduce((sum, event) => {
+        return sum + parseInt(event.price.replace(/[^0-9]/g, ''));
+    }, 0);
+    stats.priceRange.average = totalPrice / events.length;
+
+    res.json({ status: "success", data: stats });
+});
+
+// GET booked dates
+app.get('/api/events/dates', (req, res) => {
+    try {
+        console.log('Fetching dates...');
+        const dates = events.map(event => event.date);
+        res.json({
+            status: "success",
+            data: dates
+        });
+    } catch (error) {
+        console.error('Error in /api/events/dates:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error fetching dates"
+        });
+    }
+});
+
+// POST Endpoints
+
+// 1. Create a new event
+app.post('/api/events', (req, res) => {
+    const newEvent = req.body;
+    
+    // Validate required fields
+    if (!newEvent.title || !newEvent.date || !newEvent.location || !newEvent.type) {
+        return res.status(400).json({
+            status: "error",
+            message: "Missing required fields: title, date, location, and type are required"
+        });
+    }
+
+    // Generate new ID
+    const newId = events.length > 0 ? Math.max(...events.map(e => e.id)) + 1 : 1;
+    
+    // Create event object with default values
+    const event = {
+        id: newId,
+        title: newEvent.title,
+        date: newEvent.date,
+        location: newEvent.location,
+        type: newEvent.type,
+        status: newEvent.status || "Upcoming",
+        description: newEvent.description || "",
+        price: newEvent.price || "₹0",
+        image: newEvent.image || ""
+    };
+
+    // Add to events array
+    events.push(event);
+    
+    res.status(201).json({
+        status: "success",
+        message: "Event created successfully",
+        data: event
+    });
+});
+
+// 2. Create a new service
+app.post('/api/services/:category', (req, res) => {
+    const category = req.params.category.toLowerCase();
+    const newService = req.body;
+
+    // Validate category exists
+    if (!services[category]) {
+        return res.status(400).json({
+            status: "error",
+            message: "Invalid category. Must be one of: wedding, birthday, corporate"
+        });
+    }
+
+    // Validate required fields
+    if (!newService.title || !newService.description || !newService.price) {
+        return res.status(400).json({
+            status: "error",
+            message: "Missing required fields: title, description, and price are required"
+        });
+    }
+
+    // Generate new ID
+    const newId = services[category].length > 0 
+        ? Math.max(...services[category].map(s => s.id)) + 1 
+        : 1;
+
+    // Create service object
+    const service = {
+        id: newId,
+        title: newService.title,
+        description: newService.description,
+        price: newService.price,
+        includes: newService.includes || []
+    };
+
+    // Add to services array
+    services[category].push(service);
+
+    res.status(201).json({
+        status: "success",
+        message: "Service created successfully",
+        data: service
+    });
+});
+
+// 3. AI Image Generation Endpoint
+app.post('/api/events/generate-image', (req, res) => {
+    try {
+        console.log('Generating image...');
+        const { eventTitle, eventDescription, eventType } = req.body;
+        
+        // For now, using Unsplash as a placeholder
+        const imageUrl = `https://source.unsplash.com/800x600/?${eventType},${eventTitle.split(' ').join(',')}`;
+        
+        res.json({
+            status: "success",
+            imageUrl: imageUrl
+        });
+    } catch (error) {
+        console.error('Error in /api/events/generate-image:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error generating image"
+        });
+    }
+});
+
+// PUT Endpoints
+
+// 1. Update an existing event
+app.put('/api/events/:id', (req, res) => {
+    const eventId = parseInt(req.params.id);
+    const updatedEvent = req.body;
+    
+    // Find the event index
+    const eventIndex = events.findIndex(e => e.id === eventId);
+    
+    if (eventIndex === -1) {
+        return res.status(404).json({
+            status: "error",
+            message: "Event not found"
+        });
+    }
+
+    // Validate required fields if they are being updated
+    if (updatedEvent.title === "" || updatedEvent.date === "" || 
+        updatedEvent.location === "" || updatedEvent.type === "") {
+        return res.status(400).json({
+            status: "error",
+            message: "Required fields cannot be empty"
+        });
+    }
+
+    // Update the event with new values, keeping existing values if not provided
+    const event = events[eventIndex];
+    events[eventIndex] = {
+        ...event,
+        title: updatedEvent.title || event.title,
+        date: updatedEvent.date || event.date,
+        location: updatedEvent.location || event.location,
+        type: updatedEvent.type || event.type,
+        status: updatedEvent.status || event.status,
+        description: updatedEvent.description || event.description,
+        price: updatedEvent.price || event.price,
+        image: updatedEvent.image || event.image
+    };
+
+    res.json({
+        status: "success",
+        message: "Event updated successfully",
+        data: events[eventIndex]
+    });
+});
+
+// 2. Update an existing service
+app.put('/api/services/:category/:id', (req, res) => {
+    const category = req.params.category.toLowerCase();
+    const serviceId = parseInt(req.params.id);
+    const updatedService = req.body;
+
+    // Validate category exists
+    if (!services[category]) {
+        return res.status(400).json({
+            status: "error",
+            message: "Invalid category. Must be one of: wedding, birthday, corporate"
+        });
+    }
+
+    // Find the service index
+    const serviceIndex = services[category].findIndex(s => s.id === serviceId);
+    
+    if (serviceIndex === -1) {
+        return res.status(404).json({
+            status: "error",
+            message: "Service not found"
+        });
+    }
+
+    // Validate required fields if they are being updated
+    if (updatedService.title === "" || updatedService.description === "" || 
+        updatedService.price === "") {
+        return res.status(400).json({
+            status: "error",
+            message: "Required fields cannot be empty"
+        });
+    }
+
+    // Update the service with new values, keeping existing values if not provided
+    const service = services[category][serviceIndex];
+    services[category][serviceIndex] = {
+        ...service,
+        title: updatedService.title || service.title,
+        description: updatedService.description || service.description,
+        price: updatedService.price || service.price,
+        includes: updatedService.includes || service.includes
+    };
+
+    res.json({
+        status: "success",
+        message: "Service updated successfully",
+        data: services[category][serviceIndex]
+    });
+});
+
+// DELETE endpoint to delete a service by category and id
+app.delete('/api/services/:category/:id', (req, res) => {
+    const category = req.params.category.toLowerCase();
+    const serviceId = parseInt(req.params.id);
+
+    // Validate category exists
+    if (!services[category]) {
+        return res.status(400).json({
+            status: "error",
+            message: "Invalid category. Must be one of: wedding, birthday, corporate"
+        });
+    }
+
+    // Find the service index
+    const serviceIndex = services[category].findIndex(s => s.id === serviceId);
+
+    if (serviceIndex === -1) {
+        return res.status(404).json({
+            status: "error",
+            message: "Service not found"
+        });
+    }
+
+    // Remove the service from the array
+    services[category].splice(serviceIndex, 1);
+
+    res.json({
+        status: "success",
+        message: "Service deleted successfully"
+    });
+});
+
+// Start the server
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+    console.log(`API available at http://localhost:${PORT}/api/e`)
+    });
