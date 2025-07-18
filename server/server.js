@@ -2,6 +2,8 @@
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
+const User = require('./models/User');
 require('dotenv').config();
 
 const app = express();
@@ -17,12 +19,245 @@ app.use(cors({
 
 app.use(express.json());
 
+// Authentication middleware
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+        return res.status(401).json({ 
+            status: "error", 
+            message: "Access token required" 
+        });
+    }
+
+    jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', (err, user) => {
+        if (err) {
+            return res.status(403).json({ 
+                status: "error", 
+                message: "Invalid or expired token" 
+            });
+        }
+        req.user = user;
+        next();
+    });
+};
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI)
 .then(() => console.log('MongoDB connected'))
 .catch(err => console.error('MongoDB connection error:', err));
+// Authentication Routes
 
+// 1. Register new user
+app.post('/api/auth/register', async (req, res) => {
+    try {
+        const { name, email, password, phone, address } = req.body;
+
+        // Check if user already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({
+                status: "error",
+                message: "User with this email already exists"
+            });
+        }
+
+        // Create new user
+        const user = new User({
+            name,
+            email,
+            password,
+            phone,
+            address
+        });
+
+        await user.save();
+
+        // Generate JWT token
+        const token = jwt.sign(
+            { userId: user._id, email: user.email, role: user.role },
+            process.env.JWT_SECRET || 'your-secret-key',
+            { expiresIn: '24h' }
+        );
+
+        res.status(201).json({
+            status: "success",
+            message: "User registered successfully",
+            data: {
+                user: {
+                    id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    role: user.role
+                },
+                token
+            }
+        });
+    } catch (error) {
+        console.error('Registration error:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error registering user"
+        });
+    }
+});
+
+// 2. Login user
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        // Find user by email
+        const user = await User.findOne({ email }).select('+password');
+        if (!user) {
+            return res.status(401).json({
+                status: "error",
+                message: "Invalid email or password"
+            });
+        }
+
+        // Check password
+        const isPasswordValid = await user.comparePassword(password);
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                status: "error",
+                message: "Invalid email or password"
+            });
+        }
+
+        // Generate JWT token
+        const token = jwt.sign(
+            { userId: user._id, email: user.email, role: user.role },
+            process.env.JWT_SECRET || 'your-secret-key',
+            { expiresIn: '24h' }
+        );
+
+        res.json({
+            status: "success",
+            message: "Login successful",
+            data: {
+                user: {
+                    id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    role: user.role
+                },
+                token
+            }
+        });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error during login"
+        });
+    }
+});
+
+// 3. Get current user profile
+app.get('/api/auth/profile', authenticateToken, async (req, res) => {
+    try {
+        const user = await User.findById(req.user.userId).select('-password');
+        if (!user) {
+            return res.status(404).json({
+                status: "error",
+                message: "User not found"
+            });
+        }
+
+        res.json({
+            status: "success",
+            data: user
+        });
+    } catch (error) {
+        console.error('Profile fetch error:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error fetching profile"
+        });
+    }
+});
+
+// 4. Update user profile
+app.put('/api/auth/profile', authenticateToken, async (req, res) => {
+    try {
+        const { name, phone, address } = req.body;
+
+        const user = await User.findById(req.user.userId);
+        if (!user) {
+            return res.status(404).json({
+                status: "error",
+                message: "User not found"
+            });
+        }
+
+        // Update fields
+        if (name) user.name = name;
+        if (phone) user.phone = phone;
+        if (address) user.address = address;
+
+        await user.save();
+
+        res.json({
+            status: "success",
+            message: "Profile updated successfully",
+            data: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                phone: user.phone,
+                address: user.address
+            }
+        });
+    } catch (error) {
+        console.error('Profile update error:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error updating profile"
+        });
+    }
+});
+
+// 5. Change password
+app.put('/api/auth/change-password', authenticateToken, async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        const user = await User.findById(req.user.userId).select('+password');
+        if (!user) {
+            return res.status(404).json({
+                status: "error",
+                message: "User not found"
+            });
+        }
+
+        // Verify current password
+        const isCurrentPasswordValid = await user.comparePassword(currentPassword);
+        if (!isCurrentPasswordValid) {
+            return res.status(400).json({
+                status: "error",
+                message: "Current password is incorrect"
+            });
+        }
+
+        // Update password
+        user.password = newPassword;
+        await user.save();
+
+        res.json({
+            status: "success",
+            message: "Password changed successfully"
+        });
+    } catch (error) {
+        console.error('Password change error:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error changing password"
+        });
+    }
+});
 
 // Error handling middleware
 app.use((err, req, res, next) => {
