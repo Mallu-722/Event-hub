@@ -41,3 +41,14 @@
 
 
  #### **Netlify Link** == 
+
+ make changes to the code
+
+push the code to the github
+
+make a pull request
+
+merge the pull request
+
+deploy the code to the netlify
+                                
