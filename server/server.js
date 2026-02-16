@@ -25,17 +25,17 @@ const authenticateToken = (req, res, next) => {
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) {
-        return res.status(401).json({ 
-            status: "error", 
-            message: "Access token required" 
+        return res.status(401).json({
+            status: "error",
+            message: "Access token required"
         });
     }
 
     jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', (err, user) => {
         if (err) {
-            return res.status(403).json({ 
-                status: "error", 
-                message: "Invalid or expired token" 
+            return res.status(403).json({
+                status: "error",
+                message: "Invalid or expired token"
             });
         }
         req.user = user;
@@ -45,8 +45,8 @@ const authenticateToken = (req, res, next) => {
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI)
-.then(() => console.log('MongoDB connected'))
-.catch(err => console.error('MongoDB connection error:', err));
+    .then(() => console.log('MongoDB connected'))
+    .catch(err => console.error('MongoDB connection error:', err));
 // Authentication Routes
 
 // 1. Register new user
@@ -380,63 +380,7 @@ app.get('/api/events', (req, res) => {
     }
 });
 
-// 2. Get event by ID
-app.get('/api/events/:id', (req, res) => {
-    const eventId = parseInt(req.params.id);
-    const event = events.find(e => e.id === eventId);
-    
-    if (!event) {
-        return res.status(404).json({ status: "error", message: "Event not found" });
-    }
-    res.json({ status: "success", data: event });
-});
-
-// 3. Get events by type
-app.get('/api/events/type/:type', (req, res) => {
-    const eventType = req.params.type;
-    const filteredEvents = events.filter(
-        event => event.type.toLowerCase() === eventType.toLowerCase()
-    );
-    res.json({ status: "success", data: filteredEvents });
-});
-
-// 4. Get all services
-app.get('/api/services', (req, res) => {
-    res.json({ status: "success", data: services });
-});
-
-// 5. Get services by category
-app.get('/api/services/:category', (req, res) => {
-    const category = req.params.category.toLowerCase();
-    const categoryServices = services[category];
-
-    if (!categoryServices) {
-        return res.status(404).json({ 
-            status: "error", 
-            message: "Category not found" 
-        });
-    }
-    res.json({ status: "success", data: categoryServices });
-});
-
-// 6. Search events
-app.get('/api/search', (req, res) => {
-    const { query } = req.query;
-
-    if (!query) {
-        return res.json({ status: "success", data: events });
-    }
-
-    const searchResults = events.filter(event => 
-        event.title.toLowerCase().includes(query.toLowerCase()) ||
-        event.description.toLowerCase().includes(query.toLowerCase()) ||
-        event.location.toLowerCase().includes(query.toLowerCase())
-    );
-
-    res.json({ status: "success", data: searchResults });
-});
-
-// 7. Get upcoming events
+// 2. Get upcoming events
 app.get('/api/events/upcoming', (req, res) => {
     const today = new Date();
     const upcomingEvents = events.filter(event => {
@@ -446,7 +390,7 @@ app.get('/api/events/upcoming', (req, res) => {
     res.json({ status: "success", data: upcomingEvents });
 });
 
-// 8. Get events by date range
+// 3. Get events by date range
 app.get('/api/events/range', (req, res) => {
     const { startDate, endDate } = req.query;
 
@@ -459,7 +403,7 @@ app.get('/api/events/range', (req, res) => {
 
     const start = new Date(startDate);
     const end = new Date(endDate);
-    
+
     const eventsInRange = events.filter(event => {
         const eventDate = new Date(event.date);
         return eventDate >= start && eventDate <= end;
@@ -468,7 +412,7 @@ app.get('/api/events/range', (req, res) => {
     res.json({ status: "success", data: eventsInRange });
 });
 
-// 9. Get event statistics
+// 4. Get event statistics
 app.get('/api/events/stats', (req, res) => {
     const stats = {
         totalEvents: events.length,
@@ -485,10 +429,10 @@ app.get('/api/events/stats', (req, res) => {
     events.forEach(event => {
         // Count by type
         stats.eventsByType[event.type] = (stats.eventsByType[event.type] || 0) + 1;
-        
+
         // Count by status
         stats.eventsByStatus[event.status] = (stats.eventsByStatus[event.status] || 0) + 1;
-        
+
         // Price calculations
         const price = parseInt(event.price.replace(/[^0-9]/g, ''));
         stats.priceRange.min = Math.min(stats.priceRange.min, price);
@@ -504,7 +448,7 @@ app.get('/api/events/stats', (req, res) => {
     res.json({ status: "success", data: stats });
 });
 
-// GET booked dates
+// 5. GET booked dates
 app.get('/api/events/dates', (req, res) => {
     try {
         console.log('Fetching dates...');
@@ -522,12 +466,68 @@ app.get('/api/events/dates', (req, res) => {
     }
 });
 
+// 6. Get events by type
+app.get('/api/events/type/:type', (req, res) => {
+    const eventType = req.params.type;
+    const filteredEvents = events.filter(
+        event => event.type.toLowerCase() === eventType.toLowerCase()
+    );
+    res.json({ status: "success", data: filteredEvents });
+});
+
+// 7. Get all services
+app.get('/api/services', (req, res) => {
+    res.json({ status: "success", data: services });
+});
+
+// 8. Get services by category
+app.get('/api/services/:category', (req, res) => {
+    const category = req.params.category.toLowerCase();
+    const categoryServices = services[category];
+
+    if (!categoryServices) {
+        return res.status(404).json({
+            status: "error",
+            message: "Category not found"
+        });
+    }
+    res.json({ status: "success", data: categoryServices });
+});
+
+// 9. Search events
+app.get('/api/search', (req, res) => {
+    const { query } = req.query;
+
+    if (!query) {
+        return res.json({ status: "success", data: events });
+    }
+
+    const searchResults = events.filter(event =>
+        event.title.toLowerCase().includes(query.toLowerCase()) ||
+        event.description.toLowerCase().includes(query.toLowerCase()) ||
+        event.location.toLowerCase().includes(query.toLowerCase())
+    );
+
+    res.json({ status: "success", data: searchResults });
+});
+
+// 10. Get event by ID
+app.get('/api/events/:id', (req, res) => {
+    const eventId = parseInt(req.params.id);
+    const event = events.find(e => e.id === eventId);
+
+    if (!event) {
+        return res.status(404).json({ status: "error", message: "Event not found" });
+    }
+    res.json({ status: "success", data: event });
+});
+
 // POST Endpoints
 
 // 1. Create a new event
 app.post('/api/events', (req, res) => {
     const newEvent = req.body;
-    
+
     // Validate required fields
     if (!newEvent.title || !newEvent.date || !newEvent.location || !newEvent.type) {
         return res.status(400).json({
@@ -538,7 +538,7 @@ app.post('/api/events', (req, res) => {
 
     // Generate new ID
     const newId = events.length > 0 ? Math.max(...events.map(e => e.id)) + 1 : 1;
-    
+
     // Create event object with default values
     const event = {
         id: newId,
@@ -554,7 +554,7 @@ app.post('/api/events', (req, res) => {
 
     // Add to events array
     events.push(event);
-    
+
     res.status(201).json({
         status: "success",
         message: "Event created successfully",
@@ -584,8 +584,8 @@ app.post('/api/services/:category', (req, res) => {
     }
 
     // Generate new ID
-    const newId = services[category].length > 0 
-        ? Math.max(...services[category].map(s => s.id)) + 1 
+    const newId = services[category].length > 0
+        ? Math.max(...services[category].map(s => s.id)) + 1
         : 1;
 
     // Create service object
@@ -612,10 +612,10 @@ app.post('/api/events/generate-image', (req, res) => {
     try {
         console.log('Generating image...');
         const { eventTitle, eventDescription, eventType } = req.body;
-        
+
         // For now, using Unsplash as a placeholder
         const imageUrl = `https://source.unsplash.com/800x600/?${eventType},${eventTitle.split(' ').join(',')}`;
-        
+
         res.json({
             status: "success",
             imageUrl: imageUrl
@@ -635,10 +635,10 @@ app.post('/api/events/generate-image', (req, res) => {
 app.put('/api/events/:id', (req, res) => {
     const eventId = parseInt(req.params.id);
     const updatedEvent = req.body;
-    
+
     // Find the event index
     const eventIndex = events.findIndex(e => e.id === eventId);
-    
+
     if (eventIndex === -1) {
         return res.status(404).json({
             status: "error",
@@ -647,7 +647,7 @@ app.put('/api/events/:id', (req, res) => {
     }
 
     // Validate required fields if they are being updated
-    if (updatedEvent.title === "" || updatedEvent.date === "" || 
+    if (updatedEvent.title === "" || updatedEvent.date === "" ||
         updatedEvent.location === "" || updatedEvent.type === "") {
         return res.status(400).json({
             status: "error",
@@ -692,7 +692,7 @@ app.put('/api/services/:category/:id', (req, res) => {
 
     // Find the service index
     const serviceIndex = services[category].findIndex(s => s.id === serviceId);
-    
+
     if (serviceIndex === -1) {
         return res.status(404).json({
             status: "error",
@@ -701,7 +701,7 @@ app.put('/api/services/:category/:id', (req, res) => {
     }
 
     // Validate required fields if they are being updated
-    if (updatedService.title === "" || updatedService.description === "" || 
+    if (updatedService.title === "" || updatedService.description === "" ||
         updatedService.price === "") {
         return res.status(400).json({
             status: "error",
@@ -762,4 +762,4 @@ app.delete('/api/services/:category/:id', (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
     console.log(`API available at http://localhost:${PORT}/api/e`)
-    });
+});
