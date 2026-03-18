@@ -40,7 +40,10 @@
  #### **Render Link** ==  https://s72-mallikarjun-capstone-event-hub-2.onrender.com 
 
 
- #### **Netlify Link** == 
+
+
+ #### **Netlify Link** == https://event-hub-capstone.netlify.app/
+ 
 
  make changes to the code
 
